@@ -18,9 +18,13 @@ class ClipboardHostApp extends StatefulWidget {
 class _ClipboardHostState extends State<ClipboardHostApp> {
   late LanClipboardServer server;
   late ClipboardSync sync;
+  LanClipboardClient? client;
+  late void Function(String text) send;
   String ip = "";
   final int port = 5555;
   final token = _rand();
+  final TextEditingController hostIpController = TextEditingController();
+  String clientStatus = "Not connected";
 
   @override
   void initState() {
@@ -50,10 +54,18 @@ class _ClipboardHostState extends State<ClipboardHostApp> {
 
     if (ip.isEmpty) ip = "0.0.0.0";
 
-    server = LanClipboardServer(port, token);
+    sync = ClipboardSync((text) => send(text));
+    server = LanClipboardServer(
+      port,
+      token,
+      onRemote: (text) => sync.applyRemote(text),
+    );
     await server.start();
 
-    sync = ClipboardSync(server);
+    send = (text) {
+      server.emit(text);
+      client?.send(text);
+    };
     sync.start();
 
     setState(() {});
@@ -63,6 +75,58 @@ class _ClipboardHostState extends State<ClipboardHostApp> {
     const chars = "ABCDEFG123456789";
     final r = Random();
     return List.generate(4, (_) => chars[r.nextInt(chars.length)]).join();
+  }
+
+  Future<void> connectToHost(String hostIp) async {
+    if (hostIp.trim().isEmpty) return;
+    final endpoint = "ws://$hostIp:$port";
+    client?.dispose();
+    setState(() {
+      clientStatus = "Connecting to $endpoint";
+    });
+
+    final newClient = LanClipboardClient(
+      endpoint: endpoint,
+      token: token,
+      onRemote: (text) => sync.applyRemote(text),
+      onStatus: (status) {
+        if (!mounted) return;
+        setState(() {
+          clientStatus = status == "Connected"
+              ? "Connected to $endpoint"
+              : status;
+        });
+      },
+    );
+
+    try {
+      await newClient.connect();
+      setState(() {
+        client = newClient;
+        clientStatus = "Connected to $endpoint";
+      });
+    } catch (e) {
+      newClient.dispose();
+      if (!mounted) return;
+      setState(() {
+        clientStatus = "Failed to connect: $e";
+      });
+    }
+  }
+
+  void disconnectFromHost() {
+    client?.dispose();
+    setState(() {
+      client = null;
+      clientStatus = "Not connected";
+    });
+  }
+
+  @override
+  void dispose() {
+    hostIpController.dispose();
+    client?.dispose();
+    super.dispose();
   }
 
   @override
@@ -81,6 +145,27 @@ class _ClipboardHostState extends State<ClipboardHostApp> {
               Text("Token: $token"),
               const SizedBox(height: 20),
               QrImageView(data: qr.toString(), size: 200),
+              const SizedBox(height: 24),
+              const Text("Connect to host"),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: TextField(
+                  controller: hostIpController,
+                  decoration: const InputDecoration(
+                    labelText: "Host IP",
+                    hintText: "e.g. 192.168.1.10",
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: client == null
+                    ? () => connectToHost(hostIpController.text)
+                    : disconnectFromHost,
+                child: Text(client == null ? "Connect" : "Disconnect"),
+              ),
+              const SizedBox(height: 8),
+              Text(clientStatus),
             ],
           ),
         ),

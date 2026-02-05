@@ -1,12 +1,10 @@
 import 'package:clipboard_watcher/clipboard_watcher.dart';
 import 'package:flutter/services.dart';
-import 'server.dart';
-
 class ClipboardSync with ClipboardListener {
-  final LanClipboardServer server;
+  final void Function(String text) send;
   String _last = "";
 
-  ClipboardSync(this.server);
+  ClipboardSync(this.send);
 
   void start() {
     ClipboardWatcher.instance.addListener(this);
@@ -18,7 +16,7 @@ class ClipboardSync with ClipboardListener {
     final data = await Clipboard.getData('text/plain');
     if (data?.text != null && data!.text != _last) {
       _last = data.text!;
-      server.emit(_last);
+      send(_last);
       print("Sent clipboard: $_last");
     }
   }
